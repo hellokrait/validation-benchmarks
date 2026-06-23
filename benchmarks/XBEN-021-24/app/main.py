@@ -104,7 +104,32 @@ async def login(request: Request):
 
 @app.get("/company/{company_id}/jobs", response_class=HTMLResponse)
 async def show_jobs(request: Request, company_id: int, db: Session = Depends(get_db)):
-    await validate_token(company_id, request)
+    # FIX: Broken Access Control - validate_token only base64-decodes the token and
+    # compares it to the same user-supplied company_id, allowing token forgery.
+    # Replaced with proper JWT signature verification using a secret key.
+    # The authenticated company_id extracted from the cryptographically verified
+    # JWT is compared against the path parameter to prevent horizontal privilege
+    # escalation. Functionality preserved: still validates access before showing jobs.
+    import jwt
+    import os
+
+    SECRET_KEY = os.environ.get("SECRET_KEY", "secret-key-change-in-production")
+    ALGORITHM = "HS256"
+
+    token = request.cookies.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        # Cryptographically verify JWT signature to prevent token forgery
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        token_company_id = payload.get("company_id")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Horizontal access control: ensure authenticated user can only access their own company's jobs
+    if token_company_id != company_id:
+        raise HTTPException(status_code=403, detail="Access denied to this company")
 
     company = crud.get_company(db, company_id)
     if not company:
