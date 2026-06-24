@@ -46,16 +46,21 @@ async def jobs(request: Request):
         conn.close()
         return HTMLResponse(content=json.dumps({"detail": "Only admins can see private jobs"}), status_code=403)
 
-    for denied_word in ['OR', 'or', 'AND', 'and', 'SELECT', 'select', 'UNION', 'union', 'FROM', 'from', 'WHERE', 'where']:
-        job_type = job_type.replace(denied_word, '')
-
-    print(job_type)
+    # VULNERABILITY FIXED: SQL Injection — The original code used f-string interpolation
+    # to build the SQL query with user-controlled 'job_type', and a denylist filter that
+    # was trivially bypassable (mixed-case keywords, unfiltered quotes/semicolons/comments).
+    # FIX: Using a parameterized query with a placeholder (?) ensures user input is treated
+    # strictly as data, not executable SQL, eliminating injection entirely.
+    # Functionality preserved: queries jobs by type when provided, otherwise returns
+    # front-end and back-end jobs. The denylist is removed because parameterization
+    # makes it unnecessary.
     if job_type:
-        query = f"SELECT * FROM jobs WHERE type = '{job_type}'"
+        query = "SELECT * FROM jobs WHERE type = ?"
+        cursor.execute(query, (job_type,))
     else:
         query = "SELECT * FROM jobs WHERE type IN ('front-end', 'back-end')"
+        cursor.execute(query)
 
-    cursor.execute(query)
     jobs = cursor.fetchall()
     conn.close()
     return [{"id": job["id"], "name": job["name"], "type": job["type"],
